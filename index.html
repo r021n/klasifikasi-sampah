@@ -112,6 +112,29 @@
         display: block;
       }
 
+      .switch-camera-button {
+        background: #2196f3;
+        color: white;
+        border: none;
+        padding: 0.8rem 1.6rem;
+        font-size: 1rem;
+        border-radius: 50px;
+        cursor: pointer;
+        margin: 1rem 0;
+        transition: transform 0.2s, box-shadow 0.2s;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        display: none;
+      }
+
+      .switch-camera-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 8px rgba(0, 0, 0, 0.2);
+      }
+
+      .switch-camera-button:active {
+        transform: translateY(0);
+      }
+
       @media (max-width: 600px) {
         body {
           padding: 1rem;
@@ -138,6 +161,14 @@
         Loading model...
       </div>
       <div class="webcam-container" id="webcam-container"></div>
+      <button
+        type="button"
+        class="switch-camera-button"
+        id="switch-camera-button"
+        onclick="switchCamera()"
+      >
+        Switch Camera
+      </button>
       <div class="label-container" id="label-container"></div>
     </div>
 
@@ -146,6 +177,7 @@
     <script type="text/javascript">
       const URL = "./my_model/";
       let model, webcam, labelContainer, maxPredictions;
+      let currentFacingMode = "environment";
 
       async function init() {
         const startButton = document.querySelector(".start-button");
@@ -163,7 +195,26 @@
           maxPredictions = model.getTotalClasses();
 
           const flip = true;
-          webcam = new tmImage.Webcam(400, 400, flip);
+          const isMobile = /iPhone|iPad|iPod|Android/i.test(
+            navigator.userAgent
+          );
+          const webcamSize = isMobile ? 200 : 400;
+          webcam = new tmImage.Webcam(
+            webcamSize,
+            webcamSize,
+            flip,
+            currentFacingMode
+          );
+
+          // Check if device has multiple cameras
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(
+            (device) => device.kind === "videoinput"
+          );
+          if (videoDevices.length > 1) {
+            document.getElementById("switch-camera-button").style.display =
+              "inline-block";
+          }
           await webcam.setup();
           await webcam.play();
 
@@ -181,6 +232,10 @@
 
           startButton.style.display = "none";
           loadingIndicator.classList.remove("visible");
+
+          // Cleanup resources when page is hidden/closed
+          document.addEventListener("visibilitychange", handleVisibilityChange);
+          window.addEventListener("beforeunload", cleanup);
         } catch (error) {
           console.error("Error:", error);
           startButton.classList.remove("loading");
@@ -190,10 +245,56 @@
         }
       }
 
+      let isPageVisible = true;
+      let lastPredictionTime = 0;
+      const PREDICTION_INTERVAL = 100; // Limit predictions to 10 times per second
+
+      function handleVisibilityChange() {
+        isPageVisible = !document.hidden;
+        if (!isPageVisible) {
+          cleanup();
+        } else if (webcam) {
+          webcam.play();
+          window.requestAnimationFrame(loop);
+        }
+      }
+
+      function cleanup() {
+        if (webcam) {
+          webcam.stop();
+        }
+      }
+
       async function loop() {
+        if (!isPageVisible) return;
+
         webcam.update();
-        await predict();
+        const currentTime = performance.now();
+        if (currentTime - lastPredictionTime >= PREDICTION_INTERVAL) {
+          await predict();
+          lastPredictionTime = currentTime;
+        }
         window.requestAnimationFrame(loop);
+      }
+
+      async function switchCamera() {
+        if (webcam) {
+          currentFacingMode =
+            currentFacingMode === "environment" ? "user" : "environment";
+          webcam.stop();
+          webcam = new tmImage.Webcam(
+            webcam.width,
+            webcam.height,
+            webcam.flip,
+            currentFacingMode
+          );
+          await webcam.setup();
+          await webcam.play();
+          document.getElementById("webcam-container").innerHTML = "";
+          document
+            .getElementById("webcam-container")
+            .appendChild(webcam.canvas);
+        }
       }
 
       async function predict() {
